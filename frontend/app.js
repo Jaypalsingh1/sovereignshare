@@ -247,7 +247,7 @@ class SovereignShare {
     /**
      * Create WebRTC peer connection
      */
-async createPeerConnection() {
+    async createPeerConnection() {
         const configuration = {
           iceServers: [
             {
