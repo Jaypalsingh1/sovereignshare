@@ -247,24 +247,39 @@ class SovereignShare {
     /**
      * Create WebRTC peer connection
      */
-    async createPeerConnection() {
+async createPeerConnection() {
         const configuration = {
-            iceServers: [
-              {
-                urls: [
-                  'stun:stun.l.google.com:19302',
-                  'stun:stun1.l.google.com:19302',
-                  'stun:stun2.l.google.com:19302'
-                ]
-              },
-              {
-                urls: 'turn:relay1.expressturn.com:3478',
-                username: 'efYcTnJ5yH94Xv3Q',   // demo credentials
-                credential: 'hM6ws7Wv3Pkq9rDa'  // demo credentials
-              }
-            ]
-          };
-
+          iceServers: [
+            {
+              urls: [
+                "stun:stun.l.google.com:19302",
+                "stun:stun1.l.google.com:19302",
+                "stun:stun2.l.google.com:19302",
+              ],
+            },
+            {
+              urls: "turn:openrelay.metered.ca:80",
+              username: "openrelayproject",
+              credential: "openrelayproject",
+            },
+            {
+              urls: "turn:openrelay.metered.ca:443",
+              username: "openrelayproject",
+              credential: "openrelayproject",
+            },
+            {
+              urls: "turn:openrelay.metered.ca:443?transport=tcp",
+              username: "openrelayproject",
+              credential: "openrelayproject",
+            },
+            {
+              urls: "turn:numb.viagenie.ca",
+              username: "webrtc@live.com",
+              credential: "muazkh",
+            },
+          ],
+        };
+          
         this.peerConnection = new RTCPeerConnection(configuration);
         
         this.peerConnection.onicecandidate = (event) => {
