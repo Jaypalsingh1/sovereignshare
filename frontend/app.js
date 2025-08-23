@@ -250,10 +250,20 @@ class SovereignShare {
     async createPeerConnection() {
         const configuration = {
             iceServers: [
-                { urls: 'stun:stun.l.google.com:19302' },
-                { urls: 'stun:stun1.l.google.com:19302' }
+              {
+                urls: [
+                  'stun:stun.l.google.com:19302',
+                  'stun:stun1.l.google.com:19302',
+                  'stun:stun2.l.google.com:19302'
+                ]
+              },
+              {
+                urls: 'turn:relay1.expressturn.com:3478',
+                username: 'efYcTnJ5yH94Xv3Q',   // demo credentials
+                credential: 'hM6ws7Wv3Pkq9rDa'  // demo credentials
+              }
             ]
-        };
+          };
 
         this.peerConnection = new RTCPeerConnection(configuration);
         
