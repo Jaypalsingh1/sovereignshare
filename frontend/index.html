@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SovereignShare: P2P File Exchange & Chat</title>
+    <link rel="stylesheet" href="styles.css">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+</head>
+<body>
+    <div class="container">
+        <!-- Header -->
+        <header class="header">
+            <div class="logo">
+                <i class="fas fa-share-alt"></i>
+                <h1>SovereignShare</h1>
+            </div>
+            <div class="theme-toggle" id="themeToggle">
+                <i class="fas fa-moon"></i>
+            </div>
+        </header>
+
+        <!-- Main Content -->
+        <main class="main-content">
+            <!-- Connection Panel -->
+            <div class="connection-panel">
+                <div class="panel-header">
+                    <h2><i class="fas fa-link"></i> Connection Setup</h2>
+                </div>
+                
+                <div class="connection-form">
+                    <div class="form-group">
+                        <label for="myId">My Unique ID</label>
+                        <div class="id-display">
+                            <input type="text" id="myId" readonly placeholder="Generating...">
+                            <button class="btn btn-secondary" id="copyIdBtn" title="Copy ID">
+                                <i class="fas fa-copy"></i>
+                            </button>
+                            <button class="btn btn-secondary" id="shareLinkBtn" title="Share Link">
+                                <i class="fas fa-share"></i>
+                            </button>
+                        </div>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="peerId">Peer's ID</label>
+                        <div class="peer-input">
+                            <input type="text" id="peerId" placeholder="Enter peer's ID" maxlength="10">
+                            <button class="btn btn-primary" id="connectBtn">
+                                <i class="fas fa-plug"></i> Connect
+                            </button>
+                        </div>
+                    </div>
+
+                    <div class="form-group">
+                        <label>Connection Status</label>
+                        <div class="status-display">
+                            <div class="status-indicator" id="statusIndicator">
+                                <span id="statusText">Not connected</span>
+                            </div>
+                            <button class="btn btn-danger" id="disconnectBtn" style="display: none;">
+                                <i class="fas fa-times"></i> Disconnect
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Incoming Call Alert -->
+                    <div class="incoming-call" id="incomingCall" style="display: none;">
+                        <div class="call-alert">
+                            <i class="fas fa-phone"></i>
+                            <span>Incoming connection from <strong id="callerId"></strong></span>
+                            <div class="call-actions">
+                                <button class="btn btn-success" id="acceptCallBtn">
+                                    <i class="fas fa-check"></i> Accept
+                                </button>
+                                <button class="btn btn-danger" id="rejectCallBtn">
+                                    <i class="fas fa-times"></i> Reject
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- File Transfer Panel -->
+            <div class="file-panel">
+                <div class="panel-header">
+                    <h2><i class="fas fa-file-upload"></i> File Exchange</h2>
+                </div>
+                
+                <div class="file-upload-area" id="fileUploadArea">
+                    <div class="upload-zone" id="uploadZone">
+                        <i class="fas fa-cloud-upload-alt"></i>
+                        <p>Drag & drop files here or click to browse</p>
+                        <input type="file" id="fileInput" multiple style="display: none;">
+                        <button class="btn btn-outline" id="browseBtn">Browse Files</button>
+                    </div>
+                </div>
+
+                <!-- File Progress -->
+                <div class="file-progress" id="fileProgress" style="display: none;">
+                    <div class="progress-header">
+                        <span id="fileName">filename.ext</span>
+                        <span id="progressPercent">0%</span>
+                    </div>
+                    <div class="progress-bar">
+                        <div class="progress-fill" id="progressFill"></div>
+                    </div>
+                    <div class="progress-actions">
+                        <button class="btn btn-primary" id="sendFileBtn" style="display: none;">
+                            <i class="fas fa-paper-plane"></i> Send File
+                        </button>
+                        <button class="btn btn-success" id="downloadFileBtn" style="display: none;">
+                            <i class="fas fa-download"></i> Download
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Chat Panel -->
+            <div class="chat-panel" id="chatPanel" style="display: none;">
+                <div class="panel-header">
+                    <h2><i class="fas fa-comments"></i> Real-time Chat</h2>
+                </div>
+                
+                <div class="chat-container">
+                    <div class="chat-messages" id="chatMessages">
+                        <div class="message system">
+                            <span>Chat connected! Start messaging...</span>
+                        </div>
+                    </div>
+                    
+                    <div class="chat-input">
+                        <input type="text" id="messageInput" placeholder="Type your message..." maxlength="500">
+                        <button class="btn btn-primary" id="sendMessageBtn">
+                            <i class="fas fa-paper-plane"></i>
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </main>
+
+        <!-- Notifications -->
+        <div class="notifications" id="notifications"></div>
+    </div>
+
+    <!-- Share Link Modal -->
+    <div class="modal" id="shareModal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>Share Your ID</h3>
+                <button class="modal-close" id="closeShareModal">&times;</button>
+            </div>
+            <div class="modal-body">
+                <p>Share this link with someone to start a secure file transfer:</p>
+                <div class="share-link">
+                    <input type="text" id="shareLinkInput" readonly>
+                    <button class="btn btn-secondary" id="copyLinkBtn">
+                        <i class="fas fa-copy"></i> Copy
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
+    <script src="app.js"></script>
+</body>
+</html>
