@@ -200,23 +200,12 @@ localStorage.setItem('debug', 'true');
 4. Push to the branch (`git push origin feature/amazing-feature`)
 5. Open a Pull Request
 
-## 📝 License
-
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
-
 ## 🙏 Acknowledgments
 
 - WebRTC community for the amazing peer-to-peer technology
 - Socket.IO team for real-time communication capabilities
 - Font Awesome for the beautiful icons
 - All contributors and users of this project
-
-## 📞 Support
-
-- **Issues**: [GitHub Issues](https://github.com/yourusername/sovereignshare/issues)
-- **Discussions**: [GitHub Discussions](https://github.com/yourusername/sovereignshare/discussions)
-- **Wiki**: [Project Wiki](https://github.com/yourusername/sovereignshare/wiki)
-
 ---
 
 **Made with ❤️ for sovereign, private file exchange and chat**
