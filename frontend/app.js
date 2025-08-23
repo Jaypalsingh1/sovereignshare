@@ -1,6 +1,7 @@
 /**
  * SovereignShare - P2P File Exchange & Chat Application
  * Built with vanilla JavaScript, WebRTC, and Socket.IO
+ * Enhanced for cross-network connectivity while preserving all original features
  */
 
 class SovereignShare {
@@ -16,12 +17,14 @@ class SovereignShare {
         this.fileChunks = [];
         this.fileInfo = null;
         this.chunkSize = 16 * 1024; // 16KB chunks
+        this.connectionTimeout = null;
+        this.iceGatheringTimeout = null;
         
         this.initializeElements();
         this.setupEventListeners();
-        this.initializeSocket();
         this.generateUserId();
         this.setupTheme();
+        this.initializeSocket();
     }
 
     /**
@@ -92,6 +95,7 @@ class SovereignShare {
         // Drag and drop events
         this.uploadZone.addEventListener('dragover', (e) => this.handleDragOver(e));
         this.uploadZone.addEventListener('drop', (e) => this.handleFileDrop(e));
+        this.uploadZone.addEventListener('dragleave', () => this.uploadZone.classList.remove('dragover'));
         this.uploadZone.addEventListener('click', () => this.fileInput.click());
 
         // Chat events
@@ -115,10 +119,21 @@ class SovereignShare {
     }
 
     /**
-     * Initialize Socket.IO connection
+     * Initialize Socket.IO connection with dynamic server detection
      */
     initializeSocket() {
-        this.socket = io('http://localhost:8000');
+        // Try to detect the server URL dynamically
+        const serverUrl = this.getServerUrl();
+        console.log('Connecting to server:', serverUrl);
+        
+        this.socket = io(serverUrl, {
+            transports: ['websocket', 'polling'], // Fallback transport options
+            timeout: 10000,
+            reconnection: true,
+            reconnectionAttempts: 5,
+            reconnectionDelay: 1000,
+            forceNew: true
+        });
         
         this.socket.on('connect', () => {
             console.log('Connected to signaling server');
@@ -128,9 +143,20 @@ class SovereignShare {
             this.registerUser();
         });
 
-        this.socket.on('disconnect', () => {
-            console.log('Disconnected from signaling server');
+        this.socket.on('disconnect', (reason) => {
+            console.log('Disconnected from signaling server:', reason);
             this.updateStatus('Disconnected from server', 'error');
+        });
+
+        this.socket.on('connect_error', (error) => {
+            console.error('Connection error:', error);
+            this.updateStatus('Failed to connect to server', 'error');
+            this.showNotification('Failed to connect to server. Check your connection.', 'error');
+        });
+
+        this.socket.on('registration-confirmed', (data) => {
+            console.log('Registration confirmed:', data);
+            this.updateStatus('Ready to connect', 'info');
         });
 
         this.socket.on('signaling', (data) => {
@@ -140,6 +166,31 @@ class SovereignShare {
         this.socket.on('callAccepted', (data) => {
             this.handleCallAccepted(data);
         });
+
+        this.socket.on('error', (error) => {
+            console.error('Socket error:', error);
+            this.showNotification('Server error: ' + error.message, 'error');
+        });
+
+        this.socket.on('userDisconnected', (data) => {
+            if (data.uniqueId === this.partnerId) {
+                this.showNotification('Partner disconnected', 'info');
+                this.handleDisconnection();
+            }
+        });
+    }
+
+    /**
+     * Get server URL based on current environment
+     */
+    getServerUrl() {
+        // If running in production or on different networks
+        if (window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1') {
+            return window.location.origin;
+        }
+        
+        // For local development, try to detect the actual IP
+        return 'http://localhost:8000';
     }
 
     /**
@@ -152,7 +203,10 @@ class SovereignShare {
             result += chars.charAt(Math.floor(Math.random() * chars.length));
         }
         this.userId = result;
-        this.myIdInput.value = this.userId;
+        if (this.myIdInput) {
+            this.myIdInput.value = this.userId;
+        }
+        console.log('Generated user ID:', this.userId);
     }
 
     /**
@@ -164,6 +218,8 @@ class SovereignShare {
                 uniqueId: this.userId
             });
             console.log(`Registering user: ${this.userId}`);
+        } else {
+            console.warn('Cannot register user - missing userId or socket connection');
         }
     }
 
@@ -173,7 +229,7 @@ class SovereignShare {
     checkUrlParameters() {
         const urlParams = new URLSearchParams(window.location.search);
         const peerCode = urlParams.get('code');
-        if (peerCode) {
+        if (peerCode && this.peerIdInput) {
             this.peerIdInput.value = peerCode;
             this.updateStatus('Peer ID loaded from URL', 'info');
         }
@@ -198,17 +254,22 @@ class SovereignShare {
         document.documentElement.setAttribute('data-theme', newTheme);
         localStorage.setItem('theme', newTheme);
         this.updateThemeIcon(newTheme);
+        this.showNotification(`Switched to ${newTheme} theme`, 'info');
     }
 
     /**
      * Update theme toggle icon
      */
     updateThemeIcon(theme) {
-        const icon = this.themeToggle.querySelector('i');
-        if (theme === 'dark') {
-            icon.className = 'fas fa-sun';
-        } else {
-            icon.className = 'fas fa-moon';
+        if (this.themeToggle) {
+            const icon = this.themeToggle.querySelector('i');
+            if (icon) {
+                if (theme === 'dark') {
+                    icon.className = 'fas fa-sun';
+                } else {
+                    icon.className = 'fas fa-moon';
+                }
+            }
         }
     }
 
@@ -228,6 +289,12 @@ class SovereignShare {
             return;
         }
 
+        // Check socket connection
+        if (!this.socket || !this.socket.connected) {
+            this.showNotification('Not connected to server. Please wait...', 'error');
+            return;
+        }
+
         this.partnerId = peerId;
         this.isInitiator = true;
         this.updateStatus('Initiating connection...', 'connecting');
@@ -236,54 +303,71 @@ class SovereignShare {
         try {
             await this.createPeerConnection();
             this.createDataChannel();
-            this.createOffer();
+            
+            // Wait a moment for ICE candidates to be gathered
+            setTimeout(async () => {
+                await this.createOffer();
+            }, 1000);
+            
         } catch (error) {
             console.error('Connection failed:', error);
             this.showNotification('Connection failed: ' + error.message, 'error');
-            this.resetConnectionState();
+            this.handleConnectionFailure();
         }
     }
 
     /**
-     * Create WebRTC peer connection
+     * Create WebRTC peer connection with enhanced TURN servers
      */
     async createPeerConnection() {
         const configuration = {
-          iceServers: [
-            {
-              urls: [
-                "stun:stun.l.google.com:19302",
-                "stun:stun1.l.google.com:19302",
-                "stun:stun2.l.google.com:19302",
-              ],
-            },
-            {
-              urls: "turn:openrelay.metered.ca:80",
-              username: "openrelayproject",
-              credential: "openrelayproject",
-            },
-            {
-              urls: "turn:openrelay.metered.ca:443",
-              username: "openrelayproject",
-              credential: "openrelayproject",
-            },
-            {
-              urls: "turn:openrelay.metered.ca:443?transport=tcp",
-              username: "openrelayproject",
-              credential: "openrelayproject",
-            },
-            {
-              urls: "turn:numb.viagenie.ca",
-              username: "webrtc@live.com",
-              credential: "muazkh",
-            },
-          ],
+            iceServers: [
+                // Google STUN servers
+                {
+                    urls: [
+                        "stun:stun.l.google.com:19302",
+                        "stun:stun1.l.google.com:19302",
+                        "stun:stun2.l.google.com:19302",
+                        "stun:stun3.l.google.com:19302",
+                        "stun:stun4.l.google.com:19302"
+                    ]
+                },
+                // Open Relay Project - Free and reliable TURN servers
+                {
+                    urls: [
+                        "turn:openrelay.metered.ca:80",
+                        "turn:openrelay.metered.ca:443"
+                    ],
+                    username: "openrelayproject",
+                    credential: "openrelayproject"
+                },
+                {
+                    urls: [
+                        "turn:openrelay.metered.ca:443?transport=tcp"
+                    ],
+                    username: "openrelayproject",
+                    credential: "openrelayproject"
+                },
+                // Numb TURN server (backup)
+                {
+                    urls: [
+                        "turn:numb.viagenie.ca:3478"
+                    ],
+                    username: "webrtc@live.com",
+                    credential: "muazkh"
+                }
+            ],
+            iceCandidatePoolSize: 10, // Pre-gather ICE candidates
+            iceTransportPolicy: 'all', // Use both STUN and TURN
+            bundlePolicy: 'max-bundle',
+            rtcpMuxPolicy: 'require'
         };
           
         this.peerConnection = new RTCPeerConnection(configuration);
         
         this.peerConnection.onicecandidate = (event) => {
             if (event.candidate) {
+                console.log('Sending ICE candidate:', event.candidate);
                 this.socket.emit('send-signal', {
                     from: this.userId,
                     to: this.partnerId,
@@ -297,7 +381,44 @@ class SovereignShare {
 
         this.peerConnection.onconnectionstatechange = () => {
             console.log('Connection state:', this.peerConnection.connectionState);
+            
+            switch (this.peerConnection.connectionState) {
+                case 'connected':
+                    this.clearConnectionTimeout();
+                    break;
+                case 'disconnected':
+                    this.updateStatus('Connection lost', 'error');
+                    break;
+                case 'failed':
+                    this.handleConnectionFailure();
+                    break;
+                case 'closed':
+                    this.handleDisconnection();
+                    break;
+            }
         };
+
+        this.peerConnection.oniceconnectionstatechange = () => {
+            console.log('ICE connection state:', this.peerConnection.iceConnectionState);
+            
+            switch (this.peerConnection.iceConnectionState) {
+                case 'connected':
+                case 'completed':
+                    this.clearConnectionTimeout();
+                    break;
+                case 'failed':
+                    this.handleConnectionFailure();
+                    break;
+                case 'disconnected':
+                    if (this.isConnected) {
+                        this.attemptReconnection();
+                    }
+                    break;
+            }
+        };
+
+        // Set connection timeout
+        this.setConnectionTimeout();
     }
 
     /**
@@ -321,6 +442,7 @@ class SovereignShare {
             this.updateStatus(`Connected to ${this.partnerId}`, 'connected');
             this.showChatPanel();
             this.showNotification('Connection established successfully!', 'success');
+            this.clearConnectionTimeout();
         };
 
         this.dataChannel.onclose = () => {
@@ -343,6 +465,7 @@ class SovereignShare {
      */
     async createOffer() {
         try {
+            console.log('Creating offer...');
             const offer = await this.peerConnection.createOffer();
             await this.peerConnection.setLocalDescription(offer);
             
@@ -351,9 +474,11 @@ class SovereignShare {
                 to: this.partnerId,
                 signalData: {
                     type: 'offer',
-                    ...offer
+                    sdp: offer.sdp
                 }
             });
+            
+            console.log('Offer sent');
         } catch (error) {
             console.error('Error creating offer:', error);
             throw error;
@@ -372,8 +497,12 @@ class SovereignShare {
         if (signalData.type === 'offer') {
             this.partnerId = data.from;
             this.signalingData = signalData;
-            this.callerId.textContent = data.from;
-            this.incomingCall.style.display = 'block';
+            if (this.callerId) {
+                this.callerId.textContent = data.from;
+            }
+            if (this.incomingCall) {
+                this.incomingCall.style.display = 'block';
+            }
             this.updateStatus('Incoming connection request', 'connecting');
         } else if (signalData.type === 'ice-candidate') {
             this.handleIceCandidate(signalData.candidate);
@@ -385,10 +514,15 @@ class SovereignShare {
      */
     async acceptIncomingCall() {
         try {
+            console.log('Accepting incoming call...');
             await this.createPeerConnection();
             this.setupPeerConnectionHandlers();
             
-            const offer = this.signalingData;
+            const offer = {
+                type: 'offer',
+                sdp: this.signalingData.sdp
+            };
+            
             await this.peerConnection.setRemoteDescription(offer);
             
             const answer = await this.peerConnection.createAnswer();
@@ -398,15 +532,18 @@ class SovereignShare {
                 to: this.partnerId,
                 signalData: {
                     type: 'answer',
-                    ...answer
+                    sdp: answer.sdp
                 }
             });
             
-            this.incomingCall.style.display = 'none';
+            if (this.incomingCall) {
+                this.incomingCall.style.display = 'none';
+            }
             this.isInitiator = false;
         } catch (error) {
             console.error('Error accepting call:', error);
             this.showNotification('Failed to accept connection', 'error');
+            this.handleConnectionFailure();
         }
     }
 
@@ -414,7 +551,9 @@ class SovereignShare {
      * Reject incoming call
      */
     rejectIncomingCall() {
-        this.incomingCall.style.display = 'none';
+        if (this.incomingCall) {
+            this.incomingCall.style.display = 'none';
+        }
         this.resetConnectionState();
         this.updateStatus('Call rejected', 'info');
     }
@@ -425,7 +564,19 @@ class SovereignShare {
     handleCallAccepted(data) {
         console.log('Call accepted:', data);
         if (this.peerConnection && data.signalData.type === 'answer') {
-            this.peerConnection.setRemoteDescription(data.signalData);
+            const answer = {
+                type: 'answer',
+                sdp: data.signalData.sdp
+            };
+            
+            this.peerConnection.setRemoteDescription(answer)
+                .then(() => {
+                    console.log('Remote description set successfully');
+                })
+                .catch(error => {
+                    console.error('Error setting remote description:', error);
+                    this.handleConnectionFailure();
+                });
         } else if (data.signalData.type === 'ice-candidate') {
             this.handleIceCandidate(data.signalData.candidate);
         }
@@ -485,10 +636,17 @@ class SovereignShare {
      */
     handleFileInfo(data) {
         this.fileInfo = data;
-        this.fileName.textContent = data.fileName;
-        this.fileProgress.style.display = 'block';
-        this.downloadFileBtn.style.display = 'block';
+        if (this.fileName) {
+            this.fileName.textContent = data.fileName;
+        }
+        if (this.fileProgress) {
+            this.fileProgress.style.display = 'block';
+        }
+        if (this.downloadFileBtn) {
+            this.downloadFileBtn.style.display = 'block';
+        }
         this.updateStatus('Receiving file...', 'info');
+        this.fileChunks = []; // Reset chunks array
     }
 
     /**
@@ -515,7 +673,7 @@ class SovereignShare {
         this.fileChunks = [];
         this.updateFileProgress(100);
         this.showNotification('File received successfully!', 'success');
-        this.updateStatus('File received', 'success');
+        this.updateStatus(`Connected to ${this.partnerId}`, 'connected');
     }
 
     /**
@@ -525,10 +683,18 @@ class SovereignShare {
         const files = event.target.files;
         if (files.length > 0) {
             this.currentFile = files[0];
-            this.fileName.textContent = this.currentFile.name;
-            this.fileProgress.style.display = 'block';
-            this.sendFileBtn.style.display = 'block';
-            this.downloadFileBtn.style.display = 'none';
+            if (this.fileName) {
+                this.fileName.textContent = this.currentFile.name;
+            }
+            if (this.fileProgress) {
+                this.fileProgress.style.display = 'block';
+            }
+            if (this.sendFileBtn) {
+                this.sendFileBtn.style.display = 'block';
+            }
+            if (this.downloadFileBtn) {
+                this.downloadFileBtn.style.display = 'none';
+            }
             this.updateFileProgress(0);
         }
     }
@@ -578,6 +744,7 @@ class SovereignShare {
             };
             
             this.dataChannel.send(JSON.stringify(fileInfo));
+            this.updateStatus('Sending file...', 'info');
             
             // Send file in chunks
             for (let i = 0; i < totalChunks; i++) {
@@ -610,6 +777,7 @@ class SovereignShare {
             
             this.dataChannel.send(JSON.stringify(completionData));
             this.showNotification('File sent successfully!', 'success');
+            this.updateStatus(`Connected to ${this.partnerId}`, 'connected');
             
         } catch (error) {
             console.error('Error sending file:', error);
@@ -634,6 +802,8 @@ class SovereignShare {
         a.click();
         document.body.removeChild(a);
         URL.revokeObjectURL(url);
+        
+        this.showNotification('File download started', 'success');
     }
 
     /**
@@ -645,10 +815,11 @@ class SovereignShare {
 
         this.addChatMessage(message, 'me');
         
-        if (this.dataChannel) {
+        if (this.dataChannel && this.dataChannel.readyState === 'open') {
             const messageData = {
                 type: 'chat',
-                text: message
+                text: message,
+                timestamp: new Date().toISOString()
             };
             this.dataChannel.send(JSON.stringify(messageData));
         }
@@ -660,9 +831,18 @@ class SovereignShare {
      * Add chat message to UI
      */
     addChatMessage(text, sender) {
+        if (!this.chatMessages) return;
+        
         const messageDiv = document.createElement('div');
         messageDiv.className = `message ${sender}`;
-        messageDiv.innerHTML = `<span>${this.escapeHtml(text)}</span>`;
+        
+        const timestamp = new Date().toLocaleTimeString();
+        messageDiv.innerHTML = `
+            <div class="message-content">
+                <span class="message-text">${this.escapeHtml(text)}</span>
+                <span class="message-time">${timestamp}</span>
+            </div>
+        `;
         
         this.chatMessages.appendChild(messageDiv);
         this.chatMessages.scrollTop = this.chatMessages.scrollHeight;
@@ -681,30 +861,109 @@ class SovereignShare {
      * Show chat panel
      */
     showChatPanel() {
-        this.chatPanel.style.display = 'block';
+        if (this.chatPanel) {
+            this.chatPanel.style.display = 'block';
+        }
+    }
+
+    /**
+     * Hide chat panel
+     */
+    hideChatPanel() {
+        if (this.chatPanel) {
+            this.chatPanel.style.display = 'none';
+        }
     }
 
     /**
      * Update file progress
      */
     updateFileProgress(percent) {
-        this.progressPercent.textContent = Math.round(percent) + '%';
-        this.progressFill.style.width = percent + '%';
+        if (this.progressPercent) {
+            this.progressPercent.textContent = Math.round(percent) + '%';
+        }
+        if (this.progressFill) {
+            this.progressFill.style.width = percent + '%';
+        }
     }
 
     /**
      * Update connection status
      */
     updateStatus(text, type = 'info') {
-        this.statusText.textContent = text;
-        this.statusIndicator.className = `status-indicator ${type}`;
+        if (this.statusText) {
+            this.statusText.textContent = text;
+        }
+        if (this.statusIndicator) {
+            this.statusIndicator.className = `status-indicator ${type}`;
+        }
         
         if (type === 'connected') {
-            this.disconnectBtn.style.display = 'block';
-            this.connectBtn.style.display = 'none';
+            if (this.disconnectBtn) this.disconnectBtn.style.display = 'block';
+            if (this.connectBtn) this.connectBtn.style.display = 'none';
         } else {
-            this.disconnectBtn.style.display = 'none';
-            this.connectBtn.style.display = 'block';
+            if (this.disconnectBtn) this.disconnectBtn.style.display = 'none';
+            if (this.connectBtn) this.connectBtn.style.display = 'block';
+        }
+    }
+
+    /**
+     * Set connection timeout to handle stuck connections
+     */
+    setConnectionTimeout() {
+        this.connectionTimeout = setTimeout(() => {
+            if (this.peerConnection && 
+                this.peerConnection.connectionState !== 'connected' &&
+                this.peerConnection.connectionState !== 'closed') {
+                console.log('Connection timeout - attempting reconnection');
+                this.handleConnectionFailure();
+            }
+        }, 30000); // 30 seconds timeout
+    }
+
+    /**
+     * Clear connection timeout
+     */
+    clearConnectionTimeout() {
+        if (this.connectionTimeout) {
+            clearTimeout(this.connectionTimeout);
+            this.connectionTimeout = null;
+        }
+    }
+
+    /**
+     * Handle connection failure
+     */
+    handleConnectionFailure() {
+        console.log('Connection failed - cleaning up');
+        this.clearConnectionTimeout();
+        
+        this.showNotification('Connection failed. Please try again.', 'error');
+        this.updateStatus('Connection failed', 'error');
+        
+        // Clean up the failed connection
+        if (this.peerConnection) {
+            this.peerConnection.close();
+            this.peerConnection = null;
+        }
+        
+        this.resetConnectionState();
+    }
+
+    /**
+     * Attempt reconnection
+     */
+    attemptReconnection() {
+        if (!this.isConnected && this.partnerId) {
+            console.log('Attempting to reconnect...');
+            this.updateStatus('Reconnecting...', 'connecting');
+            
+            // Wait a bit before reconnecting
+            setTimeout(() => {
+                if (!this.isConnected) {
+                    this.initiateConnection();
+                }
+            }, 2000);
         }
     }
 
@@ -744,25 +1003,27 @@ class SovereignShare {
      * Reset connection state
      */
     resetConnectionState() {
-        this.connectBtn.disabled = false;
+        if (this.connectBtn) {
+            this.connectBtn.disabled = false;
+        }
         this.peerConnection = null;
         this.dataChannel = null;
-    }
-
-    /**
-     * Hide chat panel
-     */
-    hideChatPanel() {
-        this.chatPanel.style.display = 'none';
+        this.clearConnectionTimeout();
     }
 
     /**
      * Hide file progress
      */
     hideFileProgress() {
-        this.fileProgress.style.display = 'none';
-        this.sendFileBtn.style.display = 'none';
-        this.downloadFileBtn.style.display = 'none';
+        if (this.fileProgress) {
+            this.fileProgress.style.display = 'none';
+        }
+        if (this.sendFileBtn) {
+            this.sendFileBtn.style.display = 'none';
+        }
+        if (this.downloadFileBtn) {
+            this.downloadFileBtn.style.display = 'none';
+        }
     }
 
     /**
@@ -770,15 +1031,21 @@ class SovereignShare {
      */
     showShareModal() {
         const shareUrl = `${window.location.origin}?code=${this.userId}`;
-        this.shareLinkInput.value = shareUrl;
-        this.shareModal.classList.add('show');
+        if (this.shareLinkInput) {
+            this.shareLinkInput.value = shareUrl;
+        }
+        if (this.shareModal) {
+            this.shareModal.classList.add('show');
+        }
     }
 
     /**
      * Hide share modal
      */
     hideShareModal() {
-        this.shareModal.classList.remove('show');
+        if (this.shareModal) {
+            this.shareModal.classList.remove('show');
+        }
     }
 
     /**
@@ -790,7 +1057,21 @@ class SovereignShare {
             this.showNotification('Copied to clipboard!', 'success');
         } catch (error) {
             console.error('Failed to copy:', error);
-            this.showNotification('Failed to copy to clipboard', 'error');
+            
+            // Fallback method for older browsers
+            const textArea = document.createElement('textarea');
+            textArea.value = text;
+            document.body.appendChild(textArea);
+            textArea.focus();
+            textArea.select();
+            try {
+                document.execCommand('copy');
+                this.showNotification('Copied to clipboard!', 'success');
+            } catch (fallbackError) {
+                console.error('Fallback copy failed:', fallbackError);
+                this.showNotification('Failed to copy to clipboard', 'error');
+            }
+            document.body.removeChild(textArea);
         }
     }
 
@@ -798,6 +1079,8 @@ class SovereignShare {
      * Show notification
      */
     showNotification(message, type = 'info') {
+        if (!this.notifications) return;
+        
         const notification = document.createElement('div');
         notification.className = `notification ${type}`;
         
@@ -807,15 +1090,35 @@ class SovereignShare {
         const text = document.createElement('span');
         text.textContent = message;
         
+        const closeBtn = document.createElement('button');
+        closeBtn.className = 'notification-close';
+        closeBtn.innerHTML = '×';
+        closeBtn.onclick = () => {
+            if (notification.parentNode) {
+                notification.parentNode.removeChild(notification);
+            }
+        };
+        
         notification.appendChild(icon);
         notification.appendChild(text);
+        notification.appendChild(closeBtn);
         
         this.notifications.appendChild(notification);
+        
+        // Animate in
+        setTimeout(() => {
+            notification.classList.add('show');
+        }, 100);
         
         // Auto-remove after 5 seconds
         setTimeout(() => {
             if (notification.parentNode) {
-                notification.parentNode.removeChild(notification);
+                notification.classList.remove('show');
+                setTimeout(() => {
+                    if (notification.parentNode) {
+                        notification.parentNode.removeChild(notification);
+                    }
+                }, 300);
             }
         }, 5000);
     }
@@ -828,6 +1131,7 @@ class SovereignShare {
             case 'success': return 'fas fa-check-circle';
             case 'error': return 'fas fa-exclamation-circle';
             case 'warning': return 'fas fa-exclamation-triangle';
+            case 'connecting': return 'fas fa-spinner fa-spin';
             default: return 'fas fa-info-circle';
         }
     }
@@ -835,5 +1139,11 @@ class SovereignShare {
 
 // Initialize application when DOM is loaded
 document.addEventListener('DOMContentLoaded', () => {
-    new SovereignShare();
+    console.log('DOM loaded, initializing SovereignShare...');
+    try {
+        new SovereignShare();
+        console.log('SovereignShare initialized successfully');
+    } catch (error) {
+        console.error('Failed to initialize SovereignShare:', error);
+    }
 });
