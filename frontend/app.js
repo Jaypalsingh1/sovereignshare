@@ -256,24 +256,30 @@ class SovereignShare {
     async createPeerConnection() {
         const configuration = {
             iceServers: [
-                // ✅ STUN server (for public IP discovery)
+                // ✅ STUN servers for NAT traversal
                 {
                     urls: [
-                        "stun:stun.l.google.com:19302"
+                        "stun:stun.l.google.com:19302",
+                        "stun:stun1.l.google.com:19302"
                     ]
                 },
-                // ✅ Your ExpressTURN server (relay)
+                // ✅ Free STUN servers as backup
                 {
                     urls: [
-                        "turn:relay1.expressturn.com:3480?transport=udp",
-                        "turn:relay1.expressturn.com:3480?transport=tcp"
+                        "stun:stun.relay.metered.ca:80"
+                    ]
+                },
+                // ✅ Free TURN server (use your credentials or try these)
+                {
+                    urls: [
+                        "turn:openrelay.metered.ca:80"
                     ],
-                    username: "000000002071361895",   // replace with your username
-                    credential: "jk3bS6D8I3OnrWjqb/xpiMaVzAY=" // replace with your password
+                    username: "openrelayproject",
+                    credential: "openrelayproject"
                 }
             ],
             iceCandidatePoolSize: 10,
-            iceTransportPolicy: "all", // 'all' = try STUN first, fallback to TURN
+            iceTransportPolicy: "all",
             bundlePolicy: "max-bundle",
             rtcpMuxPolicy: "require"
         };
@@ -282,7 +288,7 @@ class SovereignShare {
     
         this.peerConnection.onicecandidate = (event) => {
             if (event.candidate) {
-                console.log("Sending ICE candidate:", event.candidate);
+                console.log("Sending ICE candidate:", event.candidate.type, event.candidate.candidate);
                 this.socket.emit("send-signal", {
                     from: this.userId,
                     to: this.partnerId,
@@ -291,20 +297,46 @@ class SovereignShare {
                         candidate: event.candidate
                     }
                 });
+            } else {
+                console.log("ICE candidate gathering completed");
             }
         };
 
         this.peerConnection.onconnectionstatechange = () => {
             console.log('Connection state:', this.peerConnection.connectionState);
-            if (this.peerConnection.connectionState === 'failed') {
+            if (this.peerConnection.connectionState === 'connected') {
+                console.log('WebRTC connection established!');
+            } else if (this.peerConnection.connectionState === 'failed') {
+                console.log('WebRTC connection failed');
+                this.handleConnectionFailure();
+            } else if (this.peerConnection.connectionState === 'disconnected') {
+                console.log('WebRTC connection disconnected');
                 this.handleDisconnection();
-                this.showNotification('Connection failed', 'error');
             }
         };
 
         this.peerConnection.oniceconnectionstatechange = () => {
             console.log('ICE connection state:', this.peerConnection.iceConnectionState);
+            if (this.peerConnection.iceConnectionState === 'failed') {
+                console.log('ICE connection failed - attempting restart');
+                this.handleConnectionFailure();
+            }
         };
+
+        this.peerConnection.onicegatheringstatechange = () => {
+            console.log('ICE gathering state:', this.peerConnection.iceGatheringState);
+        };
+    }
+
+    /**
+     * Handle connection failure
+     */
+    handleConnectionFailure() {
+        this.showNotification('Connection failed. Please try again.', 'error');
+        this.updateStatus('Connection failed', 'error');
+        setTimeout(() => {
+            this.handleDisconnection();
+        }, 2000);
     }
 
     /**
@@ -385,7 +417,13 @@ class SovereignShare {
             this.pendingOffer = signalData;
             
         } else if (signalData.type === 'ice-candidate') {
-            await this.handleIceCandidate(signalData.candidate);
+            console.log('Received ICE candidate');
+            if (this.peerConnection && this.peerConnection.remoteDescription) {
+                await this.handleIceCandidate(signalData.candidate);
+            } else {
+                console.log('Storing ICE candidate - no remote description yet');
+                this.pendingIceCandidates.push(signalData.candidate);
+            }
         }
     }
 
@@ -401,22 +439,32 @@ class SovereignShare {
             this.setupPeerConnectionHandlers();
             
             // Set remote description with the stored offer
+            console.log('Setting remote description with offer');
             const offer = new RTCSessionDescription({
                 type: 'offer',
                 sdp: this.pendingOffer.sdp
             });
             
             await this.peerConnection.setRemoteDescription(offer);
+            console.log('Remote description set successfully');
             
             // Process any pending ICE candidates
+            console.log(`Processing ${this.pendingIceCandidates.length} pending ICE candidates`);
             for (const candidate of this.pendingIceCandidates) {
-                await this.peerConnection.addIceCandidate(candidate);
+                try {
+                    await this.peerConnection.addIceCandidate(candidate);
+                    console.log('Added pending ICE candidate');
+                } catch (error) {
+                    console.error('Error adding pending ICE candidate:', error);
+                }
             }
             this.pendingIceCandidates = [];
             
             // Create and send answer
+            console.log('Creating answer');
             const answer = await this.peerConnection.createAnswer();
             await this.peerConnection.setLocalDescription(answer);
+            console.log('Local description set');
             
             this.socket.emit('accept-signal', {
                 to: this.partnerId,
@@ -431,8 +479,9 @@ class SovereignShare {
             
         } catch (error) {
             console.error('Error accepting call:', error);
-            this.showNotification('Failed to accept connection', 'error');
+            this.showNotification('Failed to accept connection: ' + error.message, 'error');
             this.resetConnectionState();
+            this.updateStatus('Connection failed', 'error');
         }
     }
 
@@ -455,27 +504,35 @@ class SovereignShare {
         
         try {
             if (data.signalData.type === 'answer') {
+                console.log('Setting remote description with answer');
                 const answer = new RTCSessionDescription({
                     type: 'answer',
                     sdp: data.signalData.sdp
                 });
                 
                 await this.peerConnection.setRemoteDescription(answer);
+                console.log('Remote description set successfully');
                 
                 // Process any pending ICE candidates
+                console.log(`Processing ${this.pendingIceCandidates.length} pending ICE candidates`);
                 for (const candidate of this.pendingIceCandidates) {
                     await this.peerConnection.addIceCandidate(candidate);
                 }
                 this.pendingIceCandidates = [];
                 
-                console.log('Remote description set successfully');
-                
             } else if (data.signalData.type === 'ice-candidate') {
-                await this.handleIceCandidate(data.signalData.candidate);
+                console.log('Received ICE candidate in call accepted');
+                if (this.peerConnection && this.peerConnection.remoteDescription) {
+                    await this.handleIceCandidate(data.signalData.candidate);
+                } else {
+                    console.log('Storing ICE candidate - no remote description yet');
+                    this.pendingIceCandidates.push(data.signalData.candidate);
+                }
             }
         } catch (error) {
             console.error('Error handling call accepted:', error);
             this.showNotification('Failed to establish connection', 'error');
+            this.handleDisconnection();
         }
     }
 
