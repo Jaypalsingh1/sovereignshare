@@ -16,6 +16,7 @@ class SovereignShare {
         this.fileChunks = [];
         this.fileInfo = null;
         this.chunkSize = 16 * 1024; // 16KB chunks
+        this.pendingIceCandidates = []; // Store ICE candidates until remote description is set
         
         this.initializeElements();
         this.setupEventListeners();
@@ -134,11 +135,16 @@ class SovereignShare {
         });
 
         this.socket.on('signaling', (data) => {
-            this.handleIncomingCall(data);
+            this.handleIncomingSignal(data);
         });
 
         this.socket.on('callAccepted', (data) => {
             this.handleCallAccepted(data);
+        });
+
+        this.socket.on('error', (error) => {
+            console.error('Socket error:', error);
+            this.showNotification('Connection error: ' + error.message, 'error');
         });
     }
 
@@ -236,7 +242,7 @@ class SovereignShare {
         try {
             await this.createPeerConnection();
             this.createDataChannel();
-            this.createOffer();
+            await this.createOffer();
         } catch (error) {
             console.error('Connection failed:', error);
             this.showNotification('Connection failed: ' + error.message, 'error');
@@ -286,6 +292,18 @@ class SovereignShare {
                     }
                 });
             }
+        };
+
+        this.peerConnection.onconnectionstatechange = () => {
+            console.log('Connection state:', this.peerConnection.connectionState);
+            if (this.peerConnection.connectionState === 'failed') {
+                this.handleDisconnection();
+                this.showNotification('Connection failed', 'error');
+            }
+        };
+
+        this.peerConnection.oniceconnectionstatechange = () => {
+            console.log('ICE connection state:', this.peerConnection.iceConnectionState);
         };
     }
 
@@ -340,7 +358,7 @@ class SovereignShare {
                 to: this.partnerId,
                 signalData: {
                     type: 'offer',
-                    ...offer
+                    sdp: offer.sdp
                 }
             });
         } catch (error) {
@@ -350,22 +368,24 @@ class SovereignShare {
     }
 
     /**
-     * Handle incoming call
+     * Handle incoming signals (offers, answers, ICE candidates)
      */
-    handleIncomingCall(data) {
+    async handleIncomingSignal(data) {
         console.log('Incoming signal:', data);
         
         const { signalData } = data;
         
-        // Handle different types of signals
         if (signalData.type === 'offer') {
             this.partnerId = data.from;
-            this.signalingData = signalData;
             this.callerId.textContent = data.from;
             this.incomingCall.style.display = 'block';
             this.updateStatus('Incoming connection request', 'connecting');
+            
+            // Store the offer to process when call is accepted
+            this.pendingOffer = signalData;
+            
         } else if (signalData.type === 'ice-candidate') {
-            this.handleIceCandidate(signalData.candidate);
+            await this.handleIceCandidate(signalData.candidate);
         }
     }
 
@@ -374,12 +394,27 @@ class SovereignShare {
      */
     async acceptIncomingCall() {
         try {
+            this.incomingCall.style.display = 'none';
+            this.updateStatus('Accepting connection...', 'connecting');
+            
             await this.createPeerConnection();
             this.setupPeerConnectionHandlers();
             
-            const offer = this.signalingData;
+            // Set remote description with the stored offer
+            const offer = new RTCSessionDescription({
+                type: 'offer',
+                sdp: this.pendingOffer.sdp
+            });
+            
             await this.peerConnection.setRemoteDescription(offer);
             
+            // Process any pending ICE candidates
+            for (const candidate of this.pendingIceCandidates) {
+                await this.peerConnection.addIceCandidate(candidate);
+            }
+            this.pendingIceCandidates = [];
+            
+            // Create and send answer
             const answer = await this.peerConnection.createAnswer();
             await this.peerConnection.setLocalDescription(answer);
             
@@ -387,15 +422,17 @@ class SovereignShare {
                 to: this.partnerId,
                 signalData: {
                     type: 'answer',
-                    ...answer
+                    sdp: answer.sdp
                 }
             });
             
-            this.incomingCall.style.display = 'none';
             this.isInitiator = false;
+            console.log('Call accepted and answer sent');
+            
         } catch (error) {
             console.error('Error accepting call:', error);
             this.showNotification('Failed to accept connection', 'error');
+            this.resetConnectionState();
         }
     }
 
@@ -406,28 +443,58 @@ class SovereignShare {
         this.incomingCall.style.display = 'none';
         this.resetConnectionState();
         this.updateStatus('Call rejected', 'info');
+        this.pendingOffer = null;
+        this.pendingIceCandidates = [];
     }
 
     /**
-     * Handle call accepted
+     * Handle call accepted (initiator receives answer)
      */
-    handleCallAccepted(data) {
+    async handleCallAccepted(data) {
         console.log('Call accepted:', data);
-        if (this.peerConnection && data.signalData.type === 'answer') {
-            this.peerConnection.setRemoteDescription(data.signalData);
-        } else if (data.signalData.type === 'ice-candidate') {
-            this.handleIceCandidate(data.signalData.candidate);
+        
+        try {
+            if (data.signalData.type === 'answer') {
+                const answer = new RTCSessionDescription({
+                    type: 'answer',
+                    sdp: data.signalData.sdp
+                });
+                
+                await this.peerConnection.setRemoteDescription(answer);
+                
+                // Process any pending ICE candidates
+                for (const candidate of this.pendingIceCandidates) {
+                    await this.peerConnection.addIceCandidate(candidate);
+                }
+                this.pendingIceCandidates = [];
+                
+                console.log('Remote description set successfully');
+                
+            } else if (data.signalData.type === 'ice-candidate') {
+                await this.handleIceCandidate(data.signalData.candidate);
+            }
+        } catch (error) {
+            console.error('Error handling call accepted:', error);
+            this.showNotification('Failed to establish connection', 'error');
         }
     }
 
     /**
      * Handle ICE candidate
      */
-    handleIceCandidate(candidate) {
-        if (this.peerConnection && candidate) {
-            this.peerConnection.addIceCandidate(candidate).catch(error => {
+    async handleIceCandidate(candidate) {
+        if (this.peerConnection) {
+            try {
+                if (this.peerConnection.remoteDescription) {
+                    await this.peerConnection.addIceCandidate(candidate);
+                    console.log('ICE candidate added successfully');
+                } else {
+                    console.log('Storing ICE candidate for later');
+                    this.pendingIceCandidates.push(candidate);
+                }
+            } catch (error) {
                 console.error('Error adding ICE candidate:', error);
-            });
+            }
         }
     }
 
@@ -720,6 +787,8 @@ class SovereignShare {
         this.currentFile = null;
         this.fileChunks = [];
         this.fileInfo = null;
+        this.pendingIceCandidates = [];
+        this.pendingOffer = null;
         
         this.resetConnectionState();
         this.hideChatPanel();
