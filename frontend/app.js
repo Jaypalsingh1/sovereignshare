@@ -145,8 +145,8 @@ class SovereignShare {
             this.handleIncomingSignal(data);
         });
 
-        this.socket.on('callAccepted', (data) => {
-            this.handleCallAccepted(data);
+        this.socket.on('signaling', (data) => {
+            this.handlesignaling(data);
         });
 
         this.socket.on('error', (error) => {
@@ -270,39 +270,39 @@ class SovereignShare {
         const configuration = {
             iceServers: [
                 // Google STUN servers
-                {
-                    urls: [
-                        "stun:stun.l.google.com:19302",
-                        "stun:stun1.l.google.com:19302",
-                        "stun:stun2.l.google.com:19302",
-                        "stun:stun3.l.google.com:19302",
-                        "stun:stun4.l.google.com:19302"
-                    ]
-                },
+                //{
+                    //urls: [
+                        //"stun:stun.l.google.com:19302",
+                        //"stun:stun1.l.google.com:19302",
+                        //"stun:stun2.l.google.com:19302",
+                        //"stun:stun3.l.google.com:19302",
+                        //"stun:stun4.l.google.com:19302"
+                    //]
+                //},
                 // Additional STUN servers for better coverage
-                {
-                    urls: "stun:stun.relay.metered.ca:80"
-                },
+                //{
+                    //urls: "stun:stun.relay.metered.ca:80"
+                //},
                 // Multiple TURN servers with different transports
+                //{
+                    //urls: "turn:a.relay.metered.ca:80",
+                    //username: "a2b85e2ac8fa2ccc2e57e4df",
+                    //credential: "Mjvt8BVb5ufzCOxf"
+                //},
+                //{
+                    //urls: "turn:a.relay.metered.ca:80?transport=tcp",
+                    //username: "a2b85e2ac8fa2ccc2e57e4df",
+                    //credential: "Mjvt8BVb5ufzCOxf"
+                //},
+                //{
+                    //urls: "turn:a.relay.metered.ca:443",
+                    //username: "a2b85e2ac8fa2ccc2e57e4df",
+                    //credential: "Mjvt8BVb5ufzCOxf"
+                //},
                 {
-                    urls: "turn:a.relay.metered.ca:80",
-                    username: "a2b85e2ac8fa2ccc2e57e4df",
-                    credential: "Mjvt8BVb5ufzCOxf"
-                },
-                {
-                    urls: "turn:a.relay.metered.ca:80?transport=tcp",
-                    username: "a2b85e2ac8fa2ccc2e57e4df",
-                    credential: "Mjvt8BVb5ufzCOxf"
-                },
-                {
-                    urls: "turn:a.relay.metered.ca:443",
-                    username: "a2b85e2ac8fa2ccc2e57e4df",
-                    credential: "Mjvt8BVb5ufzCOxf"
-                },
-                {
-                    urls: "turn:a.relay.metered.ca:443?transport=tcp",
-                    username: "a2b85e2ac8fa2ccc2e57e4df",
-                    credential: "Mjvt8BVb5ufzCOxf"
+                    urls: "turn:numb.viagenie.ca",
+                    username: "webrtc@live.com",
+                    credential: "muazkh"
                 }
             ],
             iceCandidatePoolSize: 10,
@@ -592,7 +592,7 @@ class SovereignShare {
             await this.peerConnection.setLocalDescription(answer);
             console.log('📝 Local description set');
             
-            this.socket.emit('accept-signal', {
+            this.socket.emit('signaling', {
                 to: this.partnerId,
                 signalData: {
                     type: 'answer',
@@ -625,7 +625,7 @@ class SovereignShare {
     /**
      * Handle call accepted (initiator receives answer)
      */
-    async handleCallAccepted(data) {
+    async handlesignaling(data) {
         console.log('📥 Call accepted:', data.signalData.type);
         
         try {
