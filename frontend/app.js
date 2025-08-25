@@ -257,18 +257,18 @@ class SovereignShare {
         const configuration = {
             iceServers: [
                 // ✅ STUN servers for NAT traversal
-                {
-                    urls: [
-                        "stun:stun.l.google.com:19302",
-                        "stun:stun1.l.google.com:19302"
-                    ]
-                },
+                //{
+                    //urls: [
+                        //"stun:stun.l.google.com:19302",
+                        //"stun:stun1.l.google.com:19302"
+                    //]
+                //},
                 // ✅ Free STUN servers as backup
-                {
-                    urls: [
-                        "stun:stun.relay.metered.ca:80"
-                    ]
-                },
+                //{
+                    //urls: [
+                        //"stun:stun.relay.metered.ca:80"
+                    //]
+                //},
                 // ✅ Free TURN server (use your credentials or try these)
                 {
                     urls: [
