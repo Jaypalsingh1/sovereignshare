@@ -119,7 +119,13 @@ class SovereignShare {
      * Initialize Socket.IO connection
      */
     initializeSocket() {
-        this.socket = io('http://localhost:8000');
+        // Use same-origin when deployed, localhost when running locally
+        const socketUrl = window.location.hostname === 'localhost' ? 'http://localhost:8000' : undefined;
+        
+        this.socket = io(socketUrl, { 
+            transports: ["websocket"], 
+            withCredentials: false 
+        });
         
         this.socket.on('connect', () => {
             console.log('Connected to signaling server');
@@ -256,22 +262,24 @@ class SovereignShare {
     async createPeerConnection() {
         const configuration = {
             iceServers: [
-                
                 {
                     urls: [
                         "stun:stun.l.google.com:19302",
-                        "stun:stun1.l.google.com:19302"
+                        "stun1.l.google.com:19302"
                     ]
                 },
                 {
-                    urls: [
-                        "stun:stun.relay.metered.ca:80"
-                    ]
+                    urls: "turn:openrelay.metered.ca:80",
+                    username: "openrelayproject",
+                    credential: "openrelayproject"
                 },
                 {
-                    urls: [
-                        "turn:openrelay.metered.ca:80"
-                    ],
+                    urls: "turn:openrelay.metered.ca:80?transport=tcp",
+                    username: "openrelayproject",
+                    credential: "openrelayproject"
+                },
+                {
+                    urls: "turn:openrelay.metered.ca:443?transport=tcp",
                     username: "openrelayproject",
                     credential: "openrelayproject"
                 }
@@ -300,6 +308,10 @@ class SovereignShare {
             }
         };
 
+        this.peerConnection.onicecandidateerror = (event) => {
+            console.error('ICE candidate error:', event);
+        };
+
         this.peerConnection.onconnectionstatechange = () => {
             console.log('Connection state:', this.peerConnection.connectionState);
             if (this.peerConnection.connectionState === 'connected') {
@@ -318,11 +330,16 @@ class SovereignShare {
             if (this.peerConnection.iceConnectionState === 'failed') {
                 console.log('ICE connection failed - attempting restart');
                 this.handleConnectionFailure();
+            } else if (this.peerConnection.iceConnectionState === 'connected') {
+                console.log('ICE connection established successfully');
             }
         };
 
         this.peerConnection.onicegatheringstatechange = () => {
             console.log('ICE gathering state:', this.peerConnection.iceGatheringState);
+            if (this.peerConnection.iceGatheringState === 'complete') {
+                console.log('ICE gathering completed');
+            }
         };
     }
 
@@ -341,7 +358,7 @@ class SovereignShare {
      * Create data channel for file transfer and chat
      */
     createDataChannel() {
-        this.dataChannel = this.peerConnection.createDataChannel('fileTransfer', {
+        this.dataChannel = this.peerConnection.createDataChannel('chat', {
             ordered: true
         });
         
@@ -371,6 +388,7 @@ class SovereignShare {
         };
 
         this.dataChannel.onmessage = (event) => {
+            console.log('Data channel message received:', event.data.length, 'bytes');
             this.handleDataChannelMessage(event.data);
         };
     }
@@ -416,11 +434,13 @@ class SovereignShare {
             
         } else if (signalData.type === 'ice-candidate') {
             console.log('Received ICE candidate');
+            const candidate = new RTCIceCandidate(signalData.candidate);
+            
             if (this.peerConnection && this.peerConnection.remoteDescription) {
-                await this.handleIceCandidate(signalData.candidate);
+                await this.handleIceCandidate(candidate);
             } else {
                 console.log('Storing ICE candidate - no remote description yet');
-                this.pendingIceCandidates.push(signalData.candidate);
+                this.pendingIceCandidates.push(candidate);
             }
         }
     }
@@ -520,11 +540,13 @@ class SovereignShare {
                 
             } else if (data.signalData.type === 'ice-candidate') {
                 console.log('Received ICE candidate in call accepted');
+                const candidate = new RTCIceCandidate(data.signalData.candidate);
+                
                 if (this.peerConnection && this.peerConnection.remoteDescription) {
-                    await this.handleIceCandidate(data.signalData.candidate);
+                    await this.handleIceCandidate(candidate);
                 } else {
                     console.log('Storing ICE candidate - no remote description yet');
-                    this.pendingIceCandidates.push(data.signalData.candidate);
+                    this.pendingIceCandidates.push(candidate);
                 }
             }
         } catch (error) {
