@@ -141,13 +141,23 @@ class SovereignShare {
             this.updateStatus('Disconnected from server', 'error');
         });
 
-        this.socket.on('signaling', (data) => {
-            this.handleIncomingSignal(data);
-        });
+// app.js -> initializeSocket()
 
-        this.socket.on('signaling', (data) => {
-            this.handlesignaling(data);
-        });
+// 👍 THIS IS THE FIX
+this.socket.on('signaling', (data) => {
+    const { signalData } = data;
+
+    if (signalData.type === 'offer') {
+        // This logic comes from your original handleIncomingSignal function
+        this.handleIncomingSignal(data); 
+    } else if (signalData.type === 'answer') {
+        // This logic comes from your original handlesignaling function
+        this.handlesignaling(data); 
+    } else if (signalData.type === 'ice-candidate') {
+        // Handle ICE candidates which were part of your original handleIncomingSignal
+        this.handleIncomingSignal(data);
+    }
+});
 
         this.socket.on('error', (error) => {
             console.error('Socket error:', error);
@@ -270,35 +280,15 @@ class SovereignShare {
         const configuration = {
             iceServers: [
                 // Google STUN servers
-                //{
-                    //urls: [
-                        //"stun:stun.l.google.com:19302",
-                        //"stun:stun1.l.google.com:19302",
-                        //"stun:stun2.l.google.com:19302",
-                        //"stun:stun3.l.google.com:19302",
-                        //"stun:stun4.l.google.com:19302"
-                    //]
-                //},
-                // Additional STUN servers for better coverage
-                //{
-                    //urls: "stun:stun.relay.metered.ca:80"
-                //},
-                // Multiple TURN servers with different transports
-                //{
-                    //urls: "turn:a.relay.metered.ca:80",
-                    //username: "a2b85e2ac8fa2ccc2e57e4df",
-                    //credential: "Mjvt8BVb5ufzCOxf"
-                //},
-                //{
-                    //urls: "turn:a.relay.metered.ca:80?transport=tcp",
-                    //username: "a2b85e2ac8fa2ccc2e57e4df",
-                    //credential: "Mjvt8BVb5ufzCOxf"
-                //},
-                //{
-                    //urls: "turn:a.relay.metered.ca:443",
-                    //username: "a2b85e2ac8fa2ccc2e57e4df",
-                    //credential: "Mjvt8BVb5ufzCOxf"
-                //},
+                {
+                    urls: [
+                        "stun:stun.l.google.com:19302",
+                        "stun:stun1.l.google.com:19302",
+                        "stun:stun2.l.google.com:19302",
+                        "stun:stun3.l.google.com:19302",
+                        "stun:stun4.l.google.com:19302"
+                    ]
+                },
                 {
                     urls: "turn:numb.viagenie.ca",
                     username: "webrtc@live.com",
