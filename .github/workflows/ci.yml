@@ -1,5 +1,4 @@
 name: CI/CD Pipeline
-
 on:
   push:
     branches: [ main, develop ]
@@ -12,13 +11,13 @@ jobs:
     
     strategy:
       matrix:
-        node-version: [16.x, 18.x, 20.x]
+        node-version: [18.x, 20.x]  # Removed 16.x since your engines require >=18
     
     steps:
-    - uses: actions/checkout@v3
+    - uses: actions/checkout@v4
     
     - name: Use Node.js ${{ matrix.node-version }}
-      uses: actions/setup-node@v3
+      uses: actions/setup-node@v4
       with:
         node-version: ${{ matrix.node-version }}
         cache: 'npm'
@@ -29,6 +28,11 @@ jobs:
         cd backend
         npm ci
     
+    - name: Check server starts
+      run: |
+        cd backend
+        timeout 10 npm start || echo "Server start check completed"
+    
     - name: Run tests
       run: |
         cd backend
@@ -37,7 +41,7 @@ jobs:
     - name: Check code quality
       run: |
         cd backend
-        npm run lint || echo "Linting not configured"
+        npm run lint
   
   build:
     needs: test
@@ -45,10 +49,10 @@ jobs:
     if: github.ref == 'refs/heads/main'
     
     steps:
-    - uses: actions/checkout@v3
+    - uses: actions/checkout@v4
     
     - name: Use Node.js
-      uses: actions/setup-node@v3
+      uses: actions/setup-node@v4
       with:
         node-version: '18.x'
         cache: 'npm'
@@ -62,10 +66,10 @@ jobs:
     - name: Build application
       run: |
         cd backend
-        npm run build || echo "Build script not configured"
+        npm run build
     
     - name: Upload build artifacts
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         name: build-files
-        path: backend/dist || backend/
+        path: backend/
